@@ -1,0 +1,114 @@
+name: 'Vanilla OS Desktop Image Merge'
+description: 'Merge the per-architecture Vanilla OS image digests into a multi-arch manifest list'
+author: 'Vanilla OS Contributors'
+branding:
+  icon: 'layers'
+  color: 'orange'
+
+inputs:
+  image:
+    description: 'Target image name without a tag (e.g. ghcr.io/owner/my-image)'
+    required: true
+
+  legacy-image:
+    description: 'Optional legacy image reference including tag (e.g. ghcr.io/owner/desktop:main)'
+    required: false
+
+  registry-username:
+    description: 'Registry username for authentication'
+    required: false
+
+  registry-password:
+    description: 'Registry password or token for authentication'
+    required: false
+
+outputs:
+  digest:
+    description: 'Digest of the merged manifest list'
+    value: ${{ steps.export.outputs.digest }}
+
+  image-url:
+    description: 'Target image URL (without tag)'
+    value: ${{ steps.image-name.outputs.image-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate image name
+      id: image-name
+      shell: bash
+      env:
+        IMAGE_INPUT: ${{ inputs.image }}
+      run: |
+        IMAGE_URL="$(echo "$IMAGE_INPUT" | tr '[:upper:]' '[:lower:]')"
+        echo "IMAGE_URL=$IMAGE_URL" >> "$GITHUB_ENV"
+        echo "IMAGE_REGISTRY=${IMAGE_URL%/*}" >> "$GITHUB_ENV"
+        echo "image-url=$IMAGE_URL" >> "$GITHUB_OUTPUT"
+
+    - name: Login to GitHub Package Registry
+      uses: redhat-actions/podman-login@v2
+      with:
+        registry: ${{ env.IMAGE_REGISTRY }}
+        username: ${{ inputs.registry-username || github.repository_owner }}
+        password: ${{ inputs.registry-password || github.token }}
+
+    - name: Download digests
+      uses: actions/download-artifact@v8
+      with:
+        path: ${{ runner.temp }}/digests
+        pattern: digests-*
+        merge-multiple: true
+
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.IMAGE_URL }}
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{raw}}
+          type=semver,pattern=v{{major}}
+          type=ref,event=branch
+          type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+    - name: Create manifest list and push
+      working-directory: ${{ runner.temp }}/digests
+      shell: bash
+      env:
+        META_TAGS: ${{ steps.meta.outputs.tags }}
+        LEGACY_IMAGE: ${{ inputs.legacy-image }}
+        DIGEST_FILE: ${{ runner.temp }}/vib-manifest.digest
+      run: |
+        set -euo pipefail
+        if ! compgen -G "*" > /dev/null; then
+          echo "::error::No image digests found. Did the build jobs upload them?"
+          exit 1
+        fi
+        for ref in $META_TAGS $LEGACY_IMAGE; do
+          buildah manifest create "$ref"
+          for digest_file in *; do
+            [ -f "$digest_file" ] || continue
+            buildah manifest add "$ref" \
+              "docker://${IMAGE_URL}@sha256:${digest_file}" \
+              --annotation "io.github.containers.compression.zstd=true"
+          done
+          buildah manifest push --all \
+            --compression-format zstd:chunked \
+            --digestfile "$DIGEST_FILE" \
+            "$ref" "docker://$ref"
+          echo "Pushed $ref"
+        done
+
+    - name: Export digest
+      id: export
+      shell: bash
+      run: |
+        echo "digest=$(cat "${{ runner.temp }}/vib-manifest.digest")" >> "$GITHUB_OUTPUT"
+
+    - name: Attest pushed image
+      uses: actions/attest@v4
+      with:
+        subject-name: ${{ env.IMAGE_URL }}
+        subject-digest: ${{ steps.export.outputs.digest }}
+        push-to-registry: false
