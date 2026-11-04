@@ -1,8 +1,8 @@
-# Vanilla OS Desktop Image Merge
+# Merge Images
 
 Composite GitHub Action that turns per-architecture image digests into a single multi-arch manifest list.
 
-It downloads the `digests-*` artifacts uploaded by the build jobs, creates a manifest list for each tag, pushes it, and attests the result. It must run **after** all build jobs, on a runner with Buildah installed (e.g. `ubuntu-24.04`).
+It downloads the `digests-*` artifacts uploaded by the build jobs, creates a manifest list, pushes it, and attests the result. It must run **after** all build jobs, on a runner with Buildah and Skopeo installed (e.g. `ubuntu-24.04`).
 
 ## Usage
 
@@ -14,36 +14,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04
+            arch: amd64
+          - runner: ubuntu-26.04-arm
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
-      - uses: vanilla-os/builder-gh-action@v1
+      - uses: vanilla-os/build-gh-action@main
         with:
           image: ghcr.io/${{ github.repository_owner }}/gnome
-          base-image: ghcr.io/Vanilla-OS/core
+          base-image: ghcr.io/vanilla-os/core
 
   merge:
     name: Merge
     needs: build
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
     steps:
-      - uses: vanilla-os/merge-gh-action@v1
+      - uses: vanilla-os/merge-gh-action@main
         with:
           image: ghcr.io/${{ github.repository_owner }}/gnome
 ```
 
 ## Inputs
 
-Expects one empty file per architecture inside the downloaded digests directory, named after the image digest (as produced by the build action, in the `digests-<arch>` artifacts).
+Expects one empty file per architecture inside the downloaded digests directory, named after the image digest (as produced by the build action, in the `digests-<arch>-<image>` artifacts).
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
