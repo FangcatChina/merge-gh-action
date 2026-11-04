@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: vanilla-os/builder-gh-action@v1
+      - uses: vanilla-os/build-gh-action@v1
         with:
           image: ghcr.io/${{ github.repository_owner }}/gnome
           base-image: ghcr.io/Vanilla-OS/core
