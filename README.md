@@ -2,7 +2,7 @@
 
 Composite GitHub Action that turns per-architecture image digests into a single multi-arch manifest list.
 
-It downloads the `digests-*` artifacts uploaded by the build jobs, creates a manifest list for each tag, pushes it, and attests the result. It must run **after** all build jobs, on a runner with Buildah installed (e.g. `ubuntu-24.04`).
+It downloads the `digests-*` artifacts uploaded by the build jobs, creates a manifest list, pushes it, and attests the result. It must run **after** all build jobs, on a runner with Buildah and Skopeo installed (e.g. `ubuntu-24.04`).
 
 ## Usage
 

@@ -81,23 +81,42 @@ runs:
         DIGEST_FILE: ${{ runner.temp }}/vib-manifest.digest
       run: |
         set -euo pipefail
-        if ! compgen -G "*" > /dev/null; then
+        digests=()
+        for digest_file in *; do
+          [ -f "$digest_file" ] || continue
+          digests+=("docker://${IMAGE_URL}@sha256:${digest_file}")
+        done
+        if [ ${#digests[@]} -eq 0 ]; then
           echo "::error::No image digests found. Did the build jobs upload them?"
           exit 1
         fi
-        for ref in $META_TAGS $LEGACY_IMAGE; do
-          buildah manifest create "$ref"
-          for digest_file in *; do
-            [ -f "$digest_file" ] || continue
-            buildah manifest add "$ref" \
-              "docker://${IMAGE_URL}@sha256:${digest_file}" \
-              --annotation "io.github.containers.compression.zstd=true"
-          done
-          buildah manifest push --all \
-            --compression-format zstd:chunked \
-            --digestfile "$DIGEST_FILE" \
-            "$ref" "docker://$ref"
-          echo "Pushed $ref"
+
+        tags=()
+        for tag in $META_TAGS $LEGACY_IMAGE; do
+          if [ -n "$tag" ]; then tags+=("$tag"); fi
+        done
+        if [ ${#tags[@]} -eq 0 ]; then
+          echo "::error::No target tags to push."
+          exit 1
+        fi
+
+        primary="${tags[0]}"
+        buildah manifest create "$primary"
+        for digest in "${digests[@]}"; do
+          buildah manifest add "$primary" "$digest" \
+            --annotation "io.github.containers.compression.zstd=true"
+        done
+        buildah manifest push --all \
+          --digestfile "$DIGEST_FILE" \
+          "$primary" "docker://$primary"
+        echo "Pushed $primary"
+
+        manifest_digest="$(cat "$DIGEST_FILE")"
+        for tag in "${tags[@]:1}"; do
+          skopeo copy --all \
+            "docker://${IMAGE_URL}@sha256:${manifest_digest}" \
+            "docker://$tag"
+          echo "Pushed $tag"
         done
 
     - name: Export digest
